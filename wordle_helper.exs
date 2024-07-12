@@ -1,3 +1,5 @@
+#!elixir
+
 defmodule Format do
   @moduledoc "Convenience functions for formatting printed text"
   alias IO.ANSI
@@ -43,30 +45,50 @@ defmodule GuessAndMarks do
   defstruct @enforce_keys
 
   def parse(string) do
-    if valid?(string) do
-      {:ok, do_parse(string)}
-    else
-      :error
+    case form_of(string) do
+      :separate -> {:ok, parse_separate(string)}
+      :interleaved -> {:ok, parse_interleaved(string)}
+      :error -> :error
     end
   end
 
-  def valid?(guess_and_marks) do
-    Regex.match?(~r/^([,.\/][a-zñ]){5}$/iu, guess_and_marks)
+  def valid?(string), do: form_of(string) != :error
+
+  defp form_of(string) do
+    cond do
+      Regex.match?(~r/^[a-zñ]{5} [!?x]{5}$/iu, string) -> :separate
+      Regex.match?(~r/^([a-zñ][!?x]){5}$/iu, string) -> :interleaved
+      true -> :error
+    end
   end
 
-  defp do_parse(guess_and_marks) do
-    ~r/([,.\/][a-zñ])/iu
-    |> Regex.scan(guess_and_marks, capture: :all_but_first)
-    |> List.flatten()
-    |> Enum.map(&String.graphemes/1)
-    |> Enum.map(&List.to_tuple/1)
-    |> Enum.unzip()
-    |> then(fn {marks, letters} ->
-      %__MODULE__{
-        guess: String.downcase(to_string(letters)),
-        marks: to_string(marks)
-      }
-    end)
+  defp parse_separate(guess_and_marks) do
+    [guess, marks] = String.split(guess_and_marks)
+
+    %__MODULE__{
+      guess: String.downcase(guess),
+      marks: marks
+    }
+  end
+
+  defp parse_interleaved(guess_and_marks) do
+    graphemes = String.graphemes(guess_and_marks)
+
+    guess =
+      graphemes
+      |> Enum.take_every(2)
+      |> Enum.join()
+
+    marks =
+      graphemes
+      |> Enum.drop(1)
+      |> Enum.take_every(2)
+      |> Enum.join()
+
+    %__MODULE__{
+      guess: String.downcase(guess),
+      marks: marks
+    }
   end
 
   defimpl String.Chars do
@@ -76,9 +98,9 @@ defmodule GuessAndMarks do
       Enum.zip(String.graphemes(marks), String.graphemes(guess))
       |> Enum.map(fn {m, l} -> {m, String.upcase(l)} end)
       |> Enum.map(fn
-        {".", l} -> gb(l)
-        {",", l} -> yb(l)
-        {"/", l} -> w(bb(l))
+        {"!", l} -> gb(l)
+        {"?", l} -> yb(l)
+        {"x", l} -> w(bb(l))
       end)
       |> Enum.join()
     end
@@ -90,21 +112,21 @@ defmodule Marker do
   Given a player-entered guess word and a target "word of the day",
   this returns a string representing the corresponding marks
   that the game would give.
-  '.' = letter is in the correct position (green)
-  ',' = letter is present in the word but not in the correct position (yellow)
-  '/' = letter is not in the word (gray)
+  '!' = letter is in the correct position (green)
+  '?' = letter is present in the word but not in the correct position (yellow)
+  'x' = letter is not in the word (gray)
 
       iex> Marker.mark("adieu", "hoard")
-      ",,///"
+      "??xxx"
 
       iex> Marker.mark("nieto", "otoño")
-      "///,."
+      "xxx?!"
 
       iex> Marker.mark("chore", "close")
-      "././."
+      "!x!x!"
 
       iex> Marker.mark("banal", "polar")
-      "///.,"
+      "xxx!?"
   """
   def mark(guess, target) do
     # First pass: mark correct letters
@@ -114,17 +136,17 @@ defmodule Marker do
     guess =
       target
       |> String.graphemes()
-      |> Enum.reduce(guess, &String.replace(&2, &1, ",", global: false))
+      |> Enum.reduce(guess, &String.replace(&2, &1, "?", global: false))
 
     # Final pass: mark all remaining unmarked letters as not present
-    String.replace(guess, ~r/[^,.]/u, "/")
+    String.replace(guess, ~r/[^!?]/u, "x")
   end
 
   defp mark_correct(guess, target) do
     [String.graphemes(guess), String.graphemes(target)]
     |> Enum.zip()
     |> Enum.reduce({[], []}, fn
-      {l, l}, {guess_acc, target_acc} -> {[guess_acc, "."], target_acc}
+      {l, l}, {guess_acc, target_acc} -> {[guess_acc, "!"], target_acc}
       {g, t}, {guess_acc, target_acc} -> {[guess_acc, g], [target_acc, t]}
     end)
     |> then(fn {guess, target} ->
@@ -142,11 +164,11 @@ defmodule Matcher do
   - `:lang` - `:en` or `:es`, determines which dictionary to use as a source. Default `:es`.
   - `:sort` - if `:vowels`, sorts the results (descending) by the number of unique vowels in the word
 
-      iex> Matcher.get_matches([{"adieu", ",,///"}])
+      iex> Matcher.get_matches([{"adieu", "??xxx"}])
       [..., "hoard", ...]
   """
   def get_matches(guesses_and_marks, opts \\ []) do
-    "./dictionary_#{opts[:lang] || :en}.txt"
+    Path.join([__DIR__, ".wordle_helper", "./dictionary_#{opts[:lang] || :en}.txt"])
     |> File.stream!()
     |> Stream.map(&String.trim/1)
     |> Stream.filter(fn candidate ->
@@ -185,15 +207,20 @@ defmodule Runner do
 
                    #{header("GUESS_AND_MARKS")}
                    A #{obj("GUESS_AND_MARKS")} describes one line from the game board.
-                   Example: #{y(",")}a#{y(",")}d#{g(".")}i#{b("/")}e#{b("/")}u
-                   It's composed of 5 pairs of [mark] + [letter],
-                   where [mark] is one of #{g(".")}, #{y(",")}, or #{b("/")}.
 
-                   #{g(".")} = letter is in the correct position (Green)
-                   #{y(",")} = letter is in the word but not in the correct position (Yellow)
-                   #{b("/")} = letter is not in the word (Gray)
+                   Example: adieu #{y("?")}#{y("?")}#{g("!")}#{b("x")}#{b("x")}
+                   It's composed of your 5-letter guess, followed by 5 punctuation marks
+                   representing the marks that the game gave it.
 
-                   For example, you would enter #{yb("G")}#{gb("A")}#{w(bb("U"))}#{gb("N")}#{yb("T")} as #{y(",")}g#{g(".")}a#{b("/")}u#{g(".")}n#{y(",")}t
+                   #{g("!")} = letter is in the correct position (Green)
+                   #{y("?")} = letter is in the word but not in the correct position (Yellow)
+                   #{b("x")} = letter is not in the word (Gray)
+
+                   For example, you would enter #{yb("G")}#{gb("A")}#{w(bb("U"))}#{gb("N")}#{yb("T")} as 'gaunt #{y("?")}#{g("!")}#{b("x")}#{g("!")}#{y("?")}'.
+
+                   If you like, you can also "interleave" the letters and marks and
+                   the script will still understand it:
+                   a#{y("?")}d#{y("?")}i#{g("!")}e#{b("x")}u#{b("x")}
 
                    #{header("ALL COMMANDS")}
                    #{cmd("help")} | #{cmd("h")}
