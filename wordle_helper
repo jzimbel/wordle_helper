@@ -168,7 +168,7 @@ defmodule Matcher do
       [..., "hoard", ...]
   """
   def get_matches(guesses_and_marks, opts \\ []) do
-    Path.join([__DIR__, ".wordle_helper", "./dictionary_#{opts[:lang] || :en}.txt"])
+    Path.join([__DIR__, "dictionary_#{opts[:lang] || :en}.txt"])
     |> File.stream!()
     |> Stream.map(&String.trim/1)
     |> Stream.filter(fn candidate ->
