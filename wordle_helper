@@ -234,6 +234,8 @@ defmodule Runner do
                      List words from the dictionary that fit the guesses and marks you've entered so far.
                    #{cmd("suggest vowels")} | #{cmd("sv")}
                      Same as #{cmd("suggest")}, but prioritizes words containing a lot of vowels.
+                   #{cmd("count suggestions")} | #{cmd("count")}
+                     Print the number of matches for the guesses and marks you've entered so far.
                    #{cmd("lang")} #{obj("en")}|#{obj("es")}
                      Set the language of the game you're playing. English and Spanish are supported.
                    #{cmd("show state")} | #{cmd("show")}
@@ -282,6 +284,8 @@ defmodule Runner do
   defp parse_command("s"), do: {:suggest, nil}
   defp parse_command("suggest vowels"), do: {:suggest, :vowels}
   defp parse_command("sv"), do: {:suggest, :vowels}
+  defp parse_command("count suggestions"), do: :count_matches
+  defp parse_command("count"), do: :count_matches
   defp parse_command("undo"), do: :remove_last_entry
   defp parse_command("show"), do: :show_state
   defp parse_command("show state"), do: :show_state
@@ -319,18 +323,16 @@ defmodule Runner do
     |> Matcher.get_matches(lang: state.lang, sort: sort_opt)
     |> tap(fn matches ->
       IO.inspect(matches)
-
-      count = length(matches)
-
-      results =
-        case count do
-          0 -> "results :("
-          1 -> "result 🎉"
-          _ -> "results"
-        end
-
-      IO.puts("#{count} #{results}")
+      report_count(matches)
     end)
+
+    state
+  end
+
+  defp process_command(:count_matches, state) do
+    state.guesses_and_marks
+    |> Matcher.get_matches(lang: state.lang)
+    |> report_count()
 
     state
   end
@@ -375,6 +377,19 @@ defmodule Runner do
   defp process_command(:error, state) do
     IO.puts("Command not recognized")
     state
+  end
+
+  defp report_count(matches) do
+    count = length(matches)
+
+    noun =
+      case count do
+        0 -> "matches :("
+        1 -> "matches 🎉"
+        _ -> "matches"
+      end
+
+    IO.puts("#{count} #{noun}")
   end
 
   defimpl String.Chars do
