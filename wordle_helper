@@ -385,7 +385,7 @@ defmodule Runner do
     noun =
       case count do
         0 -> "matches :("
-        1 -> "matches 🎉"
+        1 -> "match 🎉"
         _ -> "matches"
       end
 
